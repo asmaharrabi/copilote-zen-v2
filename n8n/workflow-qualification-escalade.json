@@ -1,0 +1,112 @@
+{
+  "name": "ZEN - Qualification et Escalade",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zen-message-entrant",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-entree",
+      "name": "Webhook message entrant",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const crypto = require('crypto');\nconst payload = items[0].json;\nconst eventKey = crypto.createHash('sha256').update(JSON.stringify(payload) + $execution.id).digest('hex');\nreturn [{ json: { ...payload, event_key: eventKey } }];"
+      },
+      "id": "generer-cle-idempotence",
+      "name": "Générer clé idempotence",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.APP_URL}}/api/webhook/n8n",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "x-webhook-secret", "value": "={{$env.WEBHOOK_SHARED_SECRET}}" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "event_key", "value": "={{$json.event_key}}" },
+            { "name": "type", "value": "nouveau_message" },
+            { "name": "data", "value": "={{$json}}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "appel-qualification",
+      "name": "Appel qualification app",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "leftValue": "={{$json.qualification.sentiment}}",
+              "rightValue": "colere",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "or"
+        }
+      },
+      "id": "condition-escalade",
+      "name": "Colère ou urgence forte ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.SLACK_WEBHOOK_URL}}",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "text", "value": "🚨 Escalade automatique — conversation {{$json.conversation_id}}" }
+          ]
+        }
+      },
+      "id": "notif-slack",
+      "name": "Notifier Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 220]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"traite\" } }}"
+      },
+      "id": "reponse-webhook",
+      "name": "Répondre au webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 400]
+    }
+  ],
+  "connections": {
+    "Webhook message entrant": { "main": [[{ "node": "Générer clé idempotence", "type": "main", "index": 0 }]] },
+    "Générer clé idempotence": { "main": [[{ "node": "Appel qualification app", "type": "main", "index": 0 }]] },
+    "Appel qualification app": { "main": [[{ "node": "Colère ou urgence forte ?", "type": "main", "index": 0 }]] },
+    "Colère ou urgence forte ?": {
+      "main": [
+        [{ "node": "Notifier Slack", "type": "main", "index": 0 }],
+        [{ "node": "Répondre au webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notifier Slack": { "main": [[{ "node": "Répondre au webhook", "type": "main", "index": 0 }]] }
+  }
+}
