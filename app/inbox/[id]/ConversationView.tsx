@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '@/lib/supabase-browser';
 import { StatusBadge, ConfidenceBadge } from '@/components/Badges';
-import { useRouter } from 'next/navigation';
 
 const CURRENT_AGENT_ID = '11111111-1111-1111-1111-111111111111'; // démo — remplacer par la session réelle
 
@@ -24,29 +24,69 @@ export default function ConversationView({
   conversation: any;
   initialMessages: Message[];
 }) {
+  const router = useRouter();
   const [messages, setMessages] = useState(initialMessages);
   const [editing, setEditing] = useState<Record<string, string>>({});
   const [loadingGenerate, setLoadingGenerate] = useState(false);
-  const router = useRouter();
   const [status, setStatus] = useState(conversation.status);
   const [resolving, setResolving] = useState(false);
-  
+
+  // Fetch défensif au montage : ne fait pas confiance aux props serveur,
+  // qui peuvent venir d'un rendu RSC mis en cache par le Router Cache de Next.js.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFresh() {
+      const [{ data: freshConv, error: convErr }, { data: freshMessages, error: msgErr }] = await Promise.all([
+        supabaseBrowser.from('conversations').select('status').eq('id', conversation.id).single(),
+        supabaseBrowser
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conversation.id)
+          .order('created_at', { ascending: true }),
+      ]);
+
+      if (cancelled) return;
+      if (convErr) console.error('[mount fetch] conversation error', convErr);
+      if (msgErr) console.error('[mount fetch] messages error', msgErr);
+      if (freshConv) setStatus(freshConv.status);
+      if (freshMessages) setMessages(freshMessages as Message[]);
+    }
+
+    loadFresh();
+    return () => {
+      cancelled = true;
+    };
+  }, [conversation.id]);
+
   useEffect(() => {
     const channel = supabaseBrowser
       .channel(`conversation-${conversation.id}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversation.id}` },
-        async () => {
-          const { data } = await supabaseBrowser
+        async (payload) => {
+          console.log('[realtime:conversation] messages event', payload);
+          const { data, error } = await supabaseBrowser
             .from('messages')
             .select('*')
             .eq('conversation_id', conversation.id)
             .order('created_at', { ascending: true });
+          if (error) console.error('[realtime:conversation] refetch messages error', error);
           if (data) setMessages(data as Message[]);
         }
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `id=eq.${conversation.id}` },
+        (payload) => {
+          console.log('[realtime:conversation] conversations event', payload);
+          setStatus(payload.new.status);
+        }
+      )
+      .subscribe((status, err) => {
+        console.log('[realtime:conversation] canal =', status, err ?? '');
+      });
 
     return () => {
       supabaseBrowser.removeChannel(channel);
@@ -68,11 +108,27 @@ export default function ConversationView({
     });
   }
 
+  async function handleResolve() {
+    setResolving(true);
+    try {
+      const res = await fetch(`/api/conversations/${conversation.id}/resolve`, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        alert(body.error ?? 'Échec de la résolution');
+        return;
+      }
+      const { conversation: updated } = await res.json();
+      setStatus(updated.status);
+      router.refresh();
+    } finally {
+      setResolving(false);
+    }
+  }
+
   const pendingAi = messages.filter((m) => m.author_type === 'ia' && m.ai_status === 'proposee');
 
   return (
     <div className="flex h-full">
-      {/* Colonne principale : historique + réponse IA */}
       <div className="flex-1 flex flex-col p-6 overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
           <div>
@@ -83,12 +139,11 @@ export default function ConversationView({
             <StatusBadge status={status} />
             {status !== 'resolu' && (
               <button
-                onClick={async () => {
-                  await fetch(`/api/conversations/${conversation.id}/resolve`, { method: 'POST' });
-                }}
-                className="rounded border border-line px-3 py-1 text-xs font-medium hover:bg-canvas"
+                onClick={handleResolve}
+                disabled={resolving}
+                className="rounded border border-line px-3 py-1 text-xs font-medium hover:bg-canvas disabled:opacity-50"
               >
-                Marquer comme résolu
+                {resolving ? 'Enregistrement…' : 'Marquer comme résolu'}
               </button>
             )}
           </div>
@@ -119,7 +174,6 @@ export default function ConversationView({
         )}
       </div>
 
-      {/* Colonne latérale : fiche client + commande */}
       <aside className="w-72 shrink-0 border-l border-line bg-surface p-5 space-y-5 overflow-y-auto">
         <section>
           <h2 className="text-xs font-medium text-faint mb-2">Fiche client</h2>

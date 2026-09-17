@@ -21,23 +21,37 @@ export default function InboxList({ initialRows }: { initialRows: InboxRow[] }) 
   const [rows, setRows] = useState(initialRows);
 
   useEffect(() => {
-    // Temps réel : tout changement sur `conversations` ou `messages` rafraîchit
-    // la vue sans rechargement complet (exigence "temps réel").
-    const channel = supabaseBrowser
-      .channel('inbox-updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, refresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, refresh)
-      .subscribe();
+    let cancelled = false;
 
     async function refresh() {
-      const { data } = await supabaseBrowser
+      const { data, error } = await supabaseBrowser
         .from('v_inbox')
         .select('*')
         .order('priority', { ascending: false });
-      if (data) setRows(data as InboxRow[]);
+      if (error) console.error('[inbox] refresh error', error);
+      if (data && !cancelled) setRows(data as InboxRow[]);
     }
 
+    // Fetch défensif au montage : ne fait pas confiance à `initialRows`,
+    // qui peut venir d'un rendu RSC mis en cache par le Router Cache de Next.js.
+    refresh();
+
+    const channel = supabaseBrowser
+      .channel('inbox-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, (payload) => {
+        console.log('[realtime:inbox] conversations event', payload);
+        refresh();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
+        console.log('[realtime:inbox] messages event', payload);
+        refresh();
+      })
+      .subscribe((status, err) => {
+        console.log('[realtime:inbox] canal =', status, err ?? '');
+      });
+
     return () => {
+      cancelled = true;
       supabaseBrowser.removeChannel(channel);
     };
   }, []);
