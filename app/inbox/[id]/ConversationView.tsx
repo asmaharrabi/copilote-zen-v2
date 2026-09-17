@@ -75,7 +75,19 @@ export default function ConversationView({
             <h1 className="text-lg font-medium">{conversation.customers?.full_name ?? 'Client inconnu'}</h1>
             <p className="text-sm text-muted">{conversation.customers?.email}</p>
           </div>
-          <StatusBadge status={conversation.status} />
+          <div className="flex items-center gap-2">
+            <StatusBadge status={conversation.status} />
+            {conversation.status !== 'resolu' && (
+              <button
+                onClick={async () => {
+                  await fetch(`/api/conversations/${conversation.id}/resolve`, { method: 'POST' });
+                }}
+                className="rounded border border-line px-3 py-1 text-xs font-medium hover:bg-canvas"
+              >
+                Marquer comme résolu
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="space-y-3 flex-1">
@@ -96,7 +108,7 @@ export default function ConversationView({
           <button
             onClick={handleGenerate}
             disabled={loadingGenerate}
-            className="mt-4 self-start rounded bg-zen px-4 py-2 text-sm font-medium text-white hover:bg-zen-dark disabled:opacity-50"
+            className="mt-4 self-start rounded bg-zen px-4 py-2 text-sm font-medium text-zen-ink hover:bg-zen-dark hover:text-white disabled:opacity-50"
           >
             {loadingGenerate ? 'Génération…' : 'Générer une réponse IA'}
           </button>
@@ -199,7 +211,7 @@ function MessageBubble({
 
         {isPendingAi && (
           <div className="mt-2 flex gap-2">
-            <button onClick={onValidate} className="rounded bg-zen px-3 py-1 text-xs font-medium text-white hover:bg-zen-dark">
+            <button onClick={onValidate} className="rounded bg-zen px-3 py-1 text-xs font-medium text-zen-ink hover:bg-zen-dark hover:text-white">
               Valider et envoyer
             </button>
             <button onClick={onModify} className="rounded border border-line px-3 py-1 text-xs font-medium hover:bg-canvas">
