@@ -24,76 +24,24 @@ export default function InboxList({ initialRows }: { initialRows: InboxRow[] }) 
     // Temps réel : tout changement sur `conversations` ou `messages` rafraîchit
     // la vue sans rechargement complet (exigence "temps réel").
     const channel = supabaseBrowser
-  .channel('inbox-updates')
-  .on(
-    'postgres_changes',
-    { event: '*', schema: 'public', table: 'conversations' },
-    (payload) => {
-      console.log('🔥 CONVERSATION EVENT:', payload);
-      refresh();
-    }
-  )
-  .on(
-    'postgres_changes',
-    { event: '*', schema: 'public', table: 'messages' },
-    (payload) => {
-      console.log('🔥 MESSAGE EVENT:', payload);
-      refresh();
-    })
-
-    .on(
-  'postgres_changes',
-  {
-    event: '*',
-    schema: 'public',
-    table: 'customers',
-  },
-  () => {
-    refresh();
-  }
-)
-  
-  .subscribe((status) => {
-    console.log('Realtime status:', status);
-  });
+      .channel('inbox-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, refresh)
+      .subscribe();
 
     async function refresh() {
-  const { data, error } = await supabaseBrowser
-    .from('v_inbox')
-    .select('*')
-    .order('priority', { ascending: false });
-
-  console.log('🔥 INBOX REFRESH:', {
-    data,
-    error,
-    count: data?.length,
-    priorities: data?.map((row) => ({
-      id: row.id,
-      priority: row.priority,
-      customer: row.customer_name,
-      message: row.last_message,
-    })),
-  });
-
-  if (error) {
-    console.error('❌ Erreur refresh inbox:', error);
-    return;
-  }
-
-  if (data) {
-  const newRows = data as InboxRow[];
-
-  console.log('🔥 SETTING ROWS:', newRows);
-
-  setRows(newRows);
-}
-}
+      const { data } = await supabaseBrowser
+        .from('v_inbox')
+        .select('*')
+        .order('priority', { ascending: false });
+      if (data) setRows(data as InboxRow[]);
+    }
 
     return () => {
       supabaseBrowser.removeChannel(channel);
     };
   }, []);
-  console.log('🟢 RENDER ROWS:', rows);
+
   if (rows.length === 0) {
     return (
       <div className="rounded border border-line bg-surface p-10 text-center text-sm text-muted">
@@ -138,7 +86,7 @@ export default function InboxList({ initialRows }: { initialRows: InboxRow[] }) 
                 <SentimentBadge sentiment={row.sentiment} />
               </td>
               <td className="px-4 py-3 font-mono text-xs text-muted">
-                {Math.round(row.wait_minutes)} min
+                {formatWaitTime(row.wait_minutes)}
               </td>
               <td className="px-4 py-3 font-mono text-xs">{row.priority.toFixed(1)}</td>
             </tr>
@@ -147,4 +95,15 @@ export default function InboxList({ initialRows }: { initialRows: InboxRow[] }) 
       </table>
     </div>
   );
+}
+
+function formatWaitTime(minutes: number): string {
+  const totalMinutes = Math.round(minutes);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const mins = totalMinutes % 60;
+
+  if (days > 0) return `${days}j ${hours}h`;
+  if (hours > 0) return `${hours}h ${mins}min`;
+  return `${mins} min`;
 }

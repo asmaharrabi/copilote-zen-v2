@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase-browser';
 import { StatusBadge, ConfidenceBadge } from '@/components/Badges';
+import { useRouter } from 'next/navigation';
 
 const CURRENT_AGENT_ID = '11111111-1111-1111-1111-111111111111'; // démo — remplacer par la session réelle
 
@@ -26,7 +27,10 @@ export default function ConversationView({
   const [messages, setMessages] = useState(initialMessages);
   const [editing, setEditing] = useState<Record<string, string>>({});
   const [loadingGenerate, setLoadingGenerate] = useState(false);
-
+  const router = useRouter();
+  const [status, setStatus] = useState(conversation.status);
+  const [resolving, setResolving] = useState(false);
+  
   useEffect(() => {
     const channel = supabaseBrowser
       .channel(`conversation-${conversation.id}`)
@@ -76,8 +80,8 @@ export default function ConversationView({
             <p className="text-sm text-muted">{conversation.customers?.email}</p>
           </div>
           <div className="flex items-center gap-2">
-            <StatusBadge status={conversation.status} />
-            {conversation.status !== 'resolu' && (
+            <StatusBadge status={status} />
+            {status !== 'resolu' && (
               <button
                 onClick={async () => {
                   await fetch(`/api/conversations/${conversation.id}/resolve`, { method: 'POST' });
